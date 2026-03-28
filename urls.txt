@@ -1,0 +1,5 @@
+# Image URL list — one URL per line
+# Lines starting with # are ignored
+
+https://media-cdn.tripadvisor.com/media/photo-m/1280/20/c6/3c/36/caption.jpg
+https://media-cdn.tripadvisor.com/media/photo-o/1e/00/34/d9/adventure-kastoria.jpg
