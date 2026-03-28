@@ -184,52 +184,108 @@ def build_excel(results: list[dict], output_path: Path) -> None:
 
 
 # ── Summary sheet ─────────────────────────────────────────────────────────────
+#
+# Layout (3 header rows + data):
+#
+# Row 1 : Title  (merged)
+# Row 2 : Group labels  — "Image Info" | "Mean Values" | "Color 1" … "Color 5" | "Status"
+# Row 3 : Column headers
+# Row 4+: Data
+#
+# Fixed columns  (A–L = 1–12):
+#   1  #          2  URL        3  Filename   4  W×H
+#   5  R mean     6  G mean     7  B mean
+#   8  H° mean    9  S% mean   10  V% mean
+#  11  L mean    12  C mean
+#
+# Color columns, 3 per cluster × 5 clusters = 15 cols  (M–AA = 13–27):
+#   13  C1 swatch   14  C1 %   15  C1 name
+#   16  C2 swatch   17  C2 %   18  C2 name
+#   … etc.
+#
+# Status column : 28 (AB)
+
+_N_TOP        = 5          # number of top colors to show
+_COL_FIXED    = 12         # last fixed column index
+_COLS_PER_CL  = 3          # swatch + % + name
+_COL_STATUS   = _COL_FIXED + _N_TOP * _COLS_PER_CL + 1   # = 28
+
+# Pastel accent colours for the 5 cluster group headers
+_CL_HEADER_FILLS = ["1A5276", "1F618D", "2471A3", "2980B9", "5499C9"]
+
 
 def _build_summary_sheet(ws, results):
-    ws.freeze_panes = "A3"
+    total_cols = _COL_STATUS
 
-    # ── Title row ──────────────────────────────────────────────────────────
-    ws.merge_cells("A1:P1")
-    c = ws["A1"]
-    c.value     = "IMAGE COLOR SUMMARIZER  —  Batch Results"
+    # ── Row 1: Title ───────────────────────────────────────────────────────
+    ws.merge_cells(start_row=1, start_column=1,
+                   end_row=1,   end_column=total_cols)
+    c = ws.cell(row=1, column=1,
+                value="IMAGE COLOR SUMMARIZER  —  Batch Results")
     c.font      = Font(name="Arial", size=14, bold=True, color="FFFFFF")
     c.fill      = _fill(DARK_BG)
     c.alignment = _center()
-    ws.row_dimensions[1].height = 28
+    ws.row_dimensions[1].height = 30
 
-    # ── Column headers ─────────────────────────────────────────────────────
-    headers = [
-        "#", "URL", "Filename", "W×H",
-        "R mean", "G mean", "B mean",
-        "H° mean", "S% mean", "V% mean",
-        "L mean", "C mean",
-        "Dominant Color", "Dominant %", "Dominant Name",
-        "Status",
-    ]
-    for ci, h in enumerate(headers, 1):
-        c = ws.cell(row=2, column=ci, value=h)
+    # ── Row 2: Group labels ────────────────────────────────────────────────
+    def _group(c1, c2, label, bg):
+        ws.merge_cells(start_row=2, start_column=c1,
+                       end_row=2,   end_column=c2)
+        cell = ws.cell(row=2, column=c1, value=label)
+        cell.font      = Font(name="Arial", size=9, bold=True, color="FFFFFF")
+        cell.fill      = _fill(bg)
+        cell.alignment = _center()
+        cell.border    = _border()
+        for col in range(c1 + 1, c2 + 1):
+            ws.cell(row=2, column=col).fill   = _fill(bg)
+            ws.cell(row=2, column=col).border = _border()
+
+    _group(1, 4,   "Image Info",    DARK_BG)
+    _group(5, 12,  "Mean Values",   MID_BG)
+    for i in range(_N_TOP):
+        c1 = _COL_FIXED + i * _COLS_PER_CL + 1
+        c2 = c1 + _COLS_PER_CL - 1
+        _group(c1, c2, f"Color {i+1}", _CL_HEADER_FILLS[i])
+    ws.cell(row=2, column=_COL_STATUS,
+            value="").fill = _fill(DARK_BG)
+    ws.row_dimensions[2].height = 18
+
+    # ── Row 3: Column headers ──────────────────────────────────────────────
+    col_headers = (
+        ["#", "URL", "Filename", "W×H",
+         "R mean", "G mean", "B mean",
+         "H° mean", "S% mean", "V% mean",
+         "L mean", "C mean"]
+        + ["HEX", "%", "Name"] * _N_TOP
+        + ["Status"]
+    )
+    for ci, h in enumerate(col_headers, 1):
+        c = ws.cell(row=3, column=ci, value=h)
         c.font      = _header_font(size=9)
         c.fill      = _fill(MID_BG)
         c.alignment = _center(wrap=True)
         c.border    = _border()
-    ws.row_dimensions[2].height = 22
+    ws.row_dimensions[3].height = 22
+
+    ws.freeze_panes = "A4"
 
     # ── Data rows ──────────────────────────────────────────────────────────
     for ri, res in enumerate(results, 1):
-        row = ri + 2
+        row = ri + 3
         bg  = ROW_ODD if ri % 2 else ROW_EVEN
         ok  = res["status"] == "ok"
 
-        def wc(col, val, bold=False, align="center", color="2C3E50", wrap=False):
+        def wc(col, val, bold=False, align="center",
+               color="2C3E50", wrap=False, cell_bg=None):
             c = ws.cell(row=row, column=col, value=val)
             c.font      = Font(name="Arial", size=9, bold=bold, color=color)
-            c.fill      = _fill(bg)
-            c.alignment = Alignment(
-                horizontal=align, vertical="center", wrap_text=wrap)
+            c.fill      = _fill(cell_bg if cell_bg else bg)
+            c.alignment = Alignment(horizontal=align, vertical="center",
+                                    wrap_text=wrap)
             c.border    = _border()
 
-        wc(1,  ri,                          bold=True)
-        # URL as hyperlink
+        wc(1, ri, bold=True)
+
         c = ws.cell(row=row, column=2, value=res["url"])
         c.hyperlink  = res["url"]
         c.font       = Font(name="Arial", size=9, color=LINK_FONT,
@@ -238,7 +294,7 @@ def _build_summary_sheet(ws, results):
         c.alignment  = _left(wrap=True)
         c.border     = _border()
 
-        wc(3,  res["filename"],             align="left")
+        wc(3,  res["filename"], align="left")
         wc(4,  f"{res['width']}×{res['height']}" if ok else "—")
 
         if ok and res["stats"]:
@@ -252,21 +308,36 @@ def _build_summary_sheet(ws, results):
             wc(11, round(st["LCH"]["L"]["mean"], 1))
             wc(12, round(st["LCH"]["C"]["mean"], 1))
 
-        if ok and res["clusters"]:
-            top = res["clusters"][0]
-            hex_val = top["hex"].lstrip("#")
-            txt_col = _readable_on(hex_val)
-            c = ws.cell(row=row, column=13, value=top["hex"])
-            c.font      = Font(name="Arial", size=9, bold=True, color=txt_col)
-            c.fill      = _fill(hex_val)
-            c.alignment = _center()
-            c.border    = _border()
-            wc(14, top["percentage"])
-            wc(15, top["name"], align="left")
+        # ── 5 color columns ───────────────────────────────────────────────
+        clusters = res.get("clusters", []) if ok else []
+        for rank in range(_N_TOP):
+            base = _COL_FIXED + rank * _COLS_PER_CL + 1   # swatch col
+            if rank < len(clusters):
+                cl      = clusters[rank]
+                hex_str = cl["hex"].lstrip("#")
+                txt_col = _readable_on(hex_str)
 
+                # Swatch cell: coloured background with hex text
+                c = ws.cell(row=row, column=base, value=cl["hex"])
+                c.font      = Font(name="Arial", size=9, bold=True, color=txt_col)
+                c.fill      = _fill(hex_str)
+                c.alignment = _center()
+                c.border    = _border()
+
+                # Percentage
+                wc(base + 1, cl["percentage"])
+
+                # Name
+                wc(base + 2, cl["name"], align="left")
+            else:
+                for offset in range(_COLS_PER_CL):
+                    wc(base + offset, "—")
+
+        # Status
         status_color = "27AE60" if ok else "E74C3C"
-        c = ws.cell(row=row, column=16,
-                    value="✓ OK" if ok else f"✗ {res.get('error','ERR')[:40]}")
+        err_text = res.get("error", "ERR") or "ERR"
+        c = ws.cell(row=row, column=_COL_STATUS,
+                    value="✓ OK" if ok else f"✗ {err_text[:35]}")
         c.font      = Font(name="Arial", size=9, bold=True, color=status_color)
         c.fill      = _fill(bg)
         c.alignment = _center(wrap=True)
@@ -274,12 +345,22 @@ def _build_summary_sheet(ws, results):
 
         ws.row_dimensions[row].height = 32
 
-    _set_col_widths(ws, {
-        "A": 5,  "B": 48, "C": 22, "D": 10,
-        "E": 8,  "F": 8,  "G": 8,  "H": 8,
-        "I": 8,  "J": 8,  "K": 8,  "L": 8,
-        "M": 12, "N": 10, "O": 20, "P": 20,
-    })
+    # ── Column widths ──────────────────────────────────────────────────────
+    widths = {
+        "A": 5,  "B": 44, "C": 20, "D": 10,
+        "E": 8,  "F": 8,  "G": 8,
+        "H": 8,  "I": 8,  "J": 8,
+        "K": 8,  "L": 8,
+    }
+    # Color columns: swatch=10, %=7, name=18 — repeat for each cluster
+    from openpyxl.utils import get_column_letter
+    for rank in range(_N_TOP):
+        base = _COL_FIXED + rank * _COLS_PER_CL + 1
+        widths[get_column_letter(base)]     = 10   # swatch/hex
+        widths[get_column_letter(base + 1)] = 7    # %
+        widths[get_column_letter(base + 2)] = 18   # name
+    widths[get_column_letter(_COL_STATUS)] = 22
+    _set_col_widths(ws, widths)
 
 
 # ── Clusters sheet ────────────────────────────────────────────────────────────
